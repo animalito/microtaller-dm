@@ -1,10 +1,23 @@
 ---
 title: "Gasto bolsillo"
-output: ioslides_presentation
+output: slidy_presentation
 date: '2022-07-05'
 editor_options: 
   chunk_output_type: console
 ---
+
+<style type="text/css">
+
+body, td {
+   font-size: 14px;
+}
+code.r{
+  font-size: 12px;
+}
+pre {
+  font-size: 14px
+}
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = T, message=F, warning=F)
@@ -12,13 +25,22 @@ library(tidyverse)
 library(usethis)
 library(here)
 library(srvyr)
+library(knitr)
 ```
+
+## ¿Qué esperar de esta mentoría?
+
+- Enfoque en la ENIGH 2020
+- Explicación conceptual de los conceptos relevantes para el *challenge*
+- No es un tutorial de código pero se utiliza (y muestra) el código en  `R` (aunque no se explicará con detalle)
+- El código está disponible en el repo [animalito/microtaller-dm](https://github.com/animalito/microtaller-dm)
+
 
 ## Diagrama entidad relación ENIGH 2020
 
-<!-- ![](img/er_enigh_2020.PNG) -->
+![](img/er_enigh_2020.PNG)
 
-<img src="img/er_enigh_2020.PNG" width="500">
+<!-- <img src="img/er_enigh_2020.PNG" width="500"> -->
 
 
 [Descriptor de archivos, p. 6](https://inegi.org.mx/contenidos/productos/prod_serv/contenidos/espanol/bvinegi/productos/nueva_estruc/889463901242.pdf)
@@ -63,12 +85,25 @@ ch
 ch_d <- ch %>% 
     as_survey_design(ids = upm, weights = factor, strata = est_dis)
 
+ch_d
+
 ch_d %>% 
     srvyr::group_by(sexo_jefe) %>% 
     srvyr::summarise(mean_ingcor = survey_mean(ing_cor))
 ```
 
-## Estados - pegamos descripción
+## Sanity check - gasto en salud
+
+En la presentación de resultados de la ENIGH 2020, se establece que
+*el rubro de cuidados de la salud obtuvo 1,266 pesos.*.
+
+```{r}
+ch_d %>% 
+    srvyr::summarise(salud = survey_mean(salud))
+```
+
+
+## Estados 
 
 ```{r}
 ubicageo <- read_csv(here("datos", 
@@ -86,13 +121,9 @@ ch_d <- ch %>%
     as_survey_design(ids = upm, weights = factor, strata = est_dis)
 ```
 
-## Datos por estado
+Generamos los datos por estado para el ingreso corriente, gasto monetario, salud, atención ambulatoria, hospital, medicinas.
 
 ```{r, cache = T}
-
-ch_d <- ch %>% 
-    as_survey_design(ids = upm, weights = factor, strata = est_dis)
-
 e <- ch_d %>% 
     srvyr::group_by(desc_ent) %>% 
     srvyr::summarise(
@@ -103,8 +134,161 @@ e <- ch_d %>%
       m.hospital = survey_mean(hospital),
       m.medicinas = survey_mean(medicinas)
       )
-
 e
 ```
 
+## [% gasto](https://r-graph-gallery.com/267-reorder-a-variable-in-ggplot2.html)
 
+```{r}
+e %>%
+  mutate(
+    pg.salud = m.salud / m.gasto_mon * 100
+  ) %>%
+  mutate(desc_ent = fct_reorder(desc_ent, pg.salud)) %>%
+  ggplot( aes(x = desc_ent, y = pg.salud)) +
+    geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.4) +
+    coord_flip() +
+    xlab("") + ylab("Gasto en salud (como % del gasto total)") +
+    theme_bw()
+```
+
+## Variables de salud
+
+Distribución por estado en [gráfico de barras agrupado](https://r-graph-gallery.com/48-grouped-barplot-with-ggplot2.html).
+
+```{r}
+ch %>% 
+  mutate(
+    suma = atenc_ambu + hospital + medicinas - salud
+  ) %>%
+  select(suma, salud, atenc_ambu, hospital, medicinas)
+
+g.e <- e %>%
+  select(!ends_with("_se"), -m.ingcor, -m.gasto_mon) %>%
+  gather(., key = "tipo", value = "valor", -desc_ent, -m.salud) %>%
+  mutate(
+    porcentaje = valor/m.salud * 100
+  )
+
+g.e 
+
+g.e %>%
+  ggplot(., aes(fill = tipo, y = porcentaje, x = desc_ent)) + 
+    geom_bar(position = "stack", stat = "identity") +
+    coord_flip() +
+    theme_bw()
+
+
+# No se necesita pre calcular el porcentaje
+# ggplot2 lo hace por ti
+ggplot(g.e, aes(fill = tipo, y=valor, x=desc_ent)) + 
+    geom_bar(position="fill", stat="identity") +
+    coord_flip() +
+    theme_bw()
+
+```
+
+## Gasto persona - gasto hogar
+
+![](img/er_enigh_2020.PNG)
+
+*Nota 1* Gasto persona y gasto hogar son excluyentes (consideran gastos distintos), por lo que se tienen que sumar para llegar al gsato monetario trimestral que considera el `concentrado_hogar`.
+
+*Nota 2* `gastotarjetas` considera los gastos que ya son reportados en `gastopersona` y en `gastohogar` para especificar si fueron realizados con tarjeta, es decir, **no se suman**.
+
+*Nota 3* Las claves de gasto no tienen un factor de expansión. En las de hogar es transparente, es decir, pegas el factor de expansión del hogar. En el de personas también se hereda el factor de expansión del hogar pero considera que los números de cuadre son los de nivel persona.
+
+Ahora, los gastos en salud del concentrado del hogar se definen como se muestra en la siguiente figura [tomada del descriptor de archivos, p. 194](https://inegi.org.mx/contenidos/productos/prod_serv/contenidos/espanol/bvinegi/productos/nueva_estruc/889463901242.pdf).
+
+![](img/gastos_salud.PNG)
+
+```{r}
+gp <- read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_gastospersona_enigh_2020_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_gastospersona_enigh_2020_ns.csv"))
+
+gp
+
+gh <- read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_gastoshogar_enigh_2020_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_gastoshogar_enigh_2020_ns.csv"))
+
+gh
+
+```
+
+## Sanity check - a totales
+
+```{r}
+# Sumando gasto trimestral en las claves J de las tablas de gasto
+bind_rows(gp, gh) %>%
+  filter(str_starts(clave, "J")) %>%
+  group_by(folioviv, foliohog) %>%
+  summarise(salud_gasto = sum(gasto_tri, na.rm = T)) %>%
+  ungroup() %>% 
+  left_join(ch) %>% # ¡Aguas! No te va a cuadrar a medias (faltan ceros)
+  mutate(suma = salud_gasto * factor) %>%
+  summarise(suma.tablas.gasto = sum(suma, na.rm = T))
+
+# Sumando el gasto en salud
+ch %>%
+  mutate(suma = salud * factor) %>%
+  summarise(suma.concentrado.hogar = sum(suma, na.rm = T))
+```
+
+## Sanity check - a medias
+
+```{r}
+tot.gastos <-
+  bind_rows(gp, gh) %>%
+  filter(str_starts(clave, "J")) %>%
+  group_by(folioviv, foliohog) %>%
+  summarise(salud_gasto = sum(gasto_tri, na.rm = T)) %>%
+  ungroup() %>% 
+  right_join(ch) %>%
+  mutate(salud_gasto = replace_na(salud_gasto, 0))
+
+tot.gastos_d <- tot.gastos %>% 
+    as_survey_design(ids = upm, weights = factor, strata = est_dis)
+
+tot.gastos_d %>% 
+    srvyr::summarise(mean_salud_gasto = survey_mean(salud_gasto))
+
+
+ch_d %>%
+  srvyr::summarise(salud = survey_mean(salud))
+
+
+```
+
+*Nota* Es **muy importante** que si trabajan las tablas de gasto a nivel de clave consideren los intervalos de confianza en sus estimaciones. Las varianzas son **importantes** y deberán hacer pruebas de hipótesis adecuadas.
+
+
+## Claves de gasto
+
+Las claves de gasto asociadas a salud, contienen información muy detallada de los gastos específicos en los hogares.
+
+```{r}
+cat.gastos <- read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_gastospersona_enigh_2020_ns",
+    "catalogos",
+    "gastos.csv"))
+
+cat.gastos %>% 
+  filter(str_starts(gastos, "J")) %>%
+  kable(.)
+```
+
+*Nota 1* Los cubrebocas están en la clave J060 si son desechables; si son cubrebocas de tela, se registran en la clave H131. 
+
+*Nota 2* Gel antibacterial se registra en la J061.
+
+## ¿Qué faltó?
+
+- Incorporar deciles de ingreso
+- Comparación intertemporal (deflactar)
