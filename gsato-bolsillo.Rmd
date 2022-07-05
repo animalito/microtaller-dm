@@ -1,0 +1,110 @@
+---
+title: "Gasto bolsillo"
+output: ioslides_presentation
+date: '2022-07-05'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, message=F, warning=F)
+library(tidyverse)
+library(usethis)
+library(here)
+library(srvyr)
+```
+
+## Diagrama entidad relación ENIGH 2020
+
+<!-- ![](img/er_enigh_2020.PNG) -->
+
+<img src="img/er_enigh_2020.PNG" width="500">
+
+
+[Descriptor de archivos, p. 6](https://inegi.org.mx/contenidos/productos/prod_serv/contenidos/espanol/bvinegi/productos/nueva_estruc/889463901242.pdf)
+
+## [Datos abiertos](https://inegi.org.mx/programas/enigh/nc/2020/#Datos_abiertos)
+
+![](img/pestaña_datos_abiertos.PNG)
+
+## [Concentrado hogar](https://www.inegi.org.mx/rnm/index.php/catalog/685/data-dictionary/F28?file_name=concentradohogar)
+
+![](img/rnm_concentradohogar.PNG)
+
+## Concentrado hogar
+
+Interesan las variables:
+
+- `salud` Cuidados de la salud
+- `atenc_ambu` Atención primaria o ambulatoria
+- `hospital` Atención hospitalaria
+- `medicinas` Medicamentos sin receta
+
+Además de todas las variables de diseño (`est_dis`, `upm`, `factor`).
+
+## Lectura base
+
+```{r, eval = F}
+use_zip("https://inegi.org.mx/contenidos/programas/enigh/nc/2020/datosabiertos/conjunto_de_datos_enigh_ns_2020_csv.zip", "datos")
+```
+
+```{r}
+ch <- read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_concentradohogar_enigh_2020_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_concentradohogar_enigh_2020_ns.csv"))
+ch
+```
+
+## Declaramos el diseño
+
+```{r}
+ch_d <- ch %>% 
+    as_survey_design(ids = upm, weights = factor, strata = est_dis)
+
+ch_d %>% 
+    srvyr::group_by(sexo_jefe) %>% 
+    srvyr::summarise(mean_ingcor = survey_mean(ing_cor))
+```
+
+## Estados - pegamos descripción
+
+```{r}
+ubicageo <- read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_concentradohogar_enigh_2020_ns",
+    "catalogos",
+    "ubica_geo.csv"))
+
+ch <- dplyr::left_join(
+  ch, ubicageo
+)
+
+# regeneramos diseño
+ch_d <- ch %>% 
+    as_survey_design(ids = upm, weights = factor, strata = est_dis)
+```
+
+## Datos por estado
+
+```{r, cache = T}
+
+ch_d <- ch %>% 
+    as_survey_design(ids = upm, weights = factor, strata = est_dis)
+
+e <- ch_d %>% 
+    srvyr::group_by(desc_ent) %>% 
+    srvyr::summarise(
+      m.ingcor = survey_mean(ing_cor),
+      m.gasto_mon = survey_mean(gasto_mon),
+      m.salud = survey_mean(salud),
+      m.atenc_ambu = survey_mean(atenc_ambu),
+      m.hospital = survey_mean(hospital),
+      m.medicinas = survey_mean(medicinas)
+      )
+
+e
+```
+
+
