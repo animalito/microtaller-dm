@@ -9,13 +9,13 @@ editor_options:
 <style type="text/css">
 
 body, td {
-   font-size: 14px;
+   font-size: 20px;
 }
 code.r{
-  font-size: 12px;
+  font-size: 20px;
 }
 pre {
-  font-size: 14px
+  font-size: 20px
 }
 </style>
 
@@ -267,6 +267,8 @@ ch_d %>%
 
 *Nota* Es **muy importante** que si trabajan las tablas de gasto a nivel de clave consideren los intervalos de confianza en sus estimaciones. Las varianzas son **importantes** y deberán hacer pruebas de hipótesis adecuadas.
 
+[En esta referencia](https://www.inegi.org.mx/contenidos/investigacion/invenc/doc/01_Analisis.pdf) (p. 42-94) pueden ver un análsis usando estadística descriptiva y pruebas de hipótesis para analizar claves de gasto considerando las varianzas en las estimaciones.
+
 
 ## Claves de gasto
 
@@ -288,7 +290,36 @@ cat.gastos %>%
 
 *Nota 2* Gel antibacterial se registra en la J061.
 
+## Creamos deciles
+
+Es usual que los datos de la ENIGH se muestren en deciles de ingreso, es decir, se establecen $10$ grupos con el mismo número de hogares y se asigna al primer grupo el $10%$ de hogares con menor ingreso(*primer decil*); al segundo grupo el $10%$ de hogares con el siguiente orden de ingreso, etc.
+
+```{r}
+# Importamos función auxiliar para crear deciles
+source("lib/crea_cortes_eco.R")
+
+deciles <- ch %>%
+  select(folioviv, foliohog, factor, upm, est_dis, ing_cor) %>%
+  corte.economico(., variable.ref = "ing_cor", pesos = "factor",
+                  cortes = 10, nombre = "deciles", prefijo = "d")
+```
+
+## Sanity check - deciles
+
+En la [presentación de resultados, lámina 20](https://inegi.org.mx/contenidos/programas/enigh/nc/2020/doc/enigh2020_ns_presentacion_resultados.pdf) obtenemos datos para checar nuestros resultados:
+
+![](img/deciles_2020.PNG)
+
+```{r, cache = T}
+deciles_d <- deciles %>% 
+    as_survey_design(ids = upm, weights = factor, strata = est_dis)
+
+deciles_d %>% 
+    srvyr::group_by(deciles) %>% 
+    srvyr::summarise(m.ingcor = survey_mean(ing_cor))
+```
+Así, tenemos las medias del ingreso corriente trimestral para cada *decil* de ingreso.
+
 ## ¿Qué faltó?
 
-- Incorporar deciles de ingreso
 - Comparación intertemporal (deflactar)
