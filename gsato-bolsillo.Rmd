@@ -40,9 +40,6 @@ library(knitr)
 
 ![](img/er_enigh_2020.PNG)
 
-<!-- <img src="img/er_enigh_2020.PNG" width="500"> -->
-
-
 [Descriptor de archivos, p. 6](https://inegi.org.mx/contenidos/productos/prod_serv/contenidos/espanol/bvinegi/productos/nueva_estruc/889463901242.pdf)
 
 ## [Datos abiertos](https://inegi.org.mx/programas/enigh/nc/2020/#Datos_abiertos)
@@ -66,8 +63,10 @@ Además de todas las variables de diseño (`est_dis`, `upm`, `factor`).
 
 ## Lectura base
 
-```{r, eval = F}
-use_zip("https://inegi.org.mx/contenidos/programas/enigh/nc/2020/datosabiertos/conjunto_de_datos_enigh_ns_2020_csv.zip", "datos")
+```{r}
+if(!file.exists("datos/conjunto_de_datos_enigh_ns_2020_csv")){
+  use_zip("https://inegi.org.mx/contenidos/programas/enigh/nc/2020/datosabiertos/conjunto_de_datos_enigh_ns_2020_csv.zip", "datos", cleanup = T)
+}
 ```
 
 ```{r}
@@ -320,6 +319,103 @@ deciles_d %>%
 ```
 Así, tenemos las medias del ingreso corriente trimestral para cada *decil* de ingreso.
 
-## ¿Qué faltó?
+## Deflactar
 
-- Comparación intertemporal (deflactar)
+Cuando realizamos comparaciones intertemporales de variables que están en pesos, es importante deflactarlas para tener precios constantes (es decir, se busca "*quitar*" el efecto de la inflación para poder comparar el fenómeno que de hecho nos interesa, en este caso el gasto en salud).
+
+En el siguiente ejercicio se muestra como llevar a precios 2020 la variable de `ing_cor` de los años 2016 y 2018.
+
+Para ello usaremos los siguientes deflactores:
+
+```
+De 2016 a 2020 es: 1.19197241224101
+De 2018 a 2020 es: 1.07156302941117
+```
+
+```{r}
+# Borramos todo en el ambiente
+rm(list = ls())
+
+# Necesitamos considerar todos los decimales
+options(scipen = 999, digits = 12)
+
+# Tabla con deflactores
+deflactores <- tibble(
+  anio = c("2016", "2018", "2020")
+  , deflactor = c(1.19197241224101, 1.07156302941117, 1),
+  stringsAsFactors = F
+)
+```
+
+Descargamos las bases de 2016 y 2018.
+
+```{r}
+# Bajamos 2018 (si no existe)
+if(!file.exists("datos/conjunto_de_datos_enigh_2018_ns_csv")){
+  use_zip("https://inegi.org.mx/contenidos/programas/enigh/nc/2018/datosabiertos/conjunto_de_datos_enigh_2018_ns_csv.zip", "datos", cleanup = T)
+}
+
+# Bajamos 2016 (si no existe)
+if(!file.exists("datos/conjunto_de_datos_enigh2016_nueva_serie_csv")){
+  use_zip("https://inegi.org.mx/contenidos/programas/enigh/nc/2016/datosabiertos/conjunto_de_datos_enigh2016_nueva_serie_csv.zip", "datos", cleanup = T)
+}
+
+```
+
+Cargamos el contentrado del hogar para los 3 años.
+
+```{r}
+
+ch <- bind_rows( 
+  bind_rows(
+  # 2020
+  mutate(read_csv(here("datos", 
+    "conjunto_de_datos_enigh_ns_2020_csv", 
+    "conjunto_de_datos_concentradohogar_enigh_2020_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_concentradohogar_enigh_2020_ns.csv")),
+    anio = "2020"),
+  # 2018
+  mutate(read_csv(here("datos", 
+    "conjunto_de_datos_enigh_2018_ns_csv",
+    "conjunto_de_datos_concentradohogar_enigh_2018_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_concentradohogar_enigh_2018_ns.csv")),
+    anio = "2018")),
+  # 2016
+  mutate(read_csv(here("datos", 
+    "conjunto_de_datos_enigh2016_nueva_serie_csv", 
+    "conjunto_de_datos_concentradohogar_enigh_2016_ns",
+    "conjunto_de_datos",
+    "conjunto_de_datos_concentradohogar_enigh_2016_ns.csv")),
+    anio = "2016")
+)
+```
+
+Deflactamos `ing_cor`, extraemos la media por decil y revisamos contra la [presentación de resultados 2020, lámina 17](https://inegi.org.mx/contenidos/programas/enigh/nc/2020/doc/enigh2020_ns_presentacion_resultados.pdf):
+
+![](img/nacionales18_20.PNG)
+
+```{r}
+
+left_join(ch, deflactores) %>%
+  mutate(ing_cor.d = ing_cor * deflactor) %>%
+  group_by(anio) %>%
+  dplyr::summarise(ing_cor_media = weighted.mean(x = ing_cor.d, w = factor))
+
+
+```
+
+## Comparaciones intertemporales
+
+```{r}
+left_join(ch, deflactores) %>%
+  mutate(ing_cor.d = ing_cor * deflactor) %>%
+  group_by(anio) %>%
+  dplyr::summarise(ing_cor_media = weighted.mean(x = ing_cor.d, w = factor))%>%
+  mutate(
+    cambio = (ing_cor_media - lag(ing_cor_media))/lag(ing_cor_media)*100
+  )
+
+```
+
